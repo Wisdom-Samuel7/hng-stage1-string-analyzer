@@ -48,14 +48,18 @@ app.post("/strings", (req, res) => {
 
 
 // 🔍 GET /strings/:value → Retrieve a specific string
+// 🟢 GET /strings/:value — get specific (case-insensitive)
 app.get("/strings/:value", (req, res) => {
-  const value = req.params.value;
-  const found = storage.find((s) => s.value === value);
+  const paramValue = req.params.value.toLowerCase();
+  const found = storage.find((s) => s.value.toLowerCase() === paramValue);
 
-  if (!found) return res.status(404).json({ error: "String not found" });
+  if (!found) {
+    return res.status(404).json({ error: "String not found" });
+  }
 
-  res.status(200).json(found);
+  return res.status(200).json(found);
 });
+
 
 
 // 🧩 GET /strings → Retrieve all strings with filtering
@@ -128,16 +132,26 @@ app.get("/strings", (req, res) => {
 });
 
 
-// 🗑️ DELETE /strings/:value → Delete a string
+// 🟢 DELETE /strings/:value — delete string (with confirmation)
 app.delete("/strings/:value", (req, res) => {
-  const value = req.params.value;
-  const index = storage.findIndex((s) => s.value === value);
+  const paramValue = req.params.value.toLowerCase();
+  const index = storage.findIndex((s) => s.value.toLowerCase() === paramValue);
 
-  if (index === -1)
+  if (index === -1) {
     return res.status(404).json({ error: "String not found in system" });
+  }
 
-  storage.splice(index, 1);
-  res.status(204).send();
+  const deleted = storage.splice(index, 1)[0];
+
+  return res.status(200).json({
+    status: "success",
+    message: `String '${deleted.value}' deleted successfully.`,
+    deleted: {
+      id: deleted.id,
+      value: deleted.value,
+      deleted_at: new Date().toISOString(),
+    },
+  });
 });
 
 
@@ -145,6 +159,7 @@ app.delete("/strings/:value", (req, res) => {
 app.get("/strings/filter-by-natural-language", (req, res) => {
   const { query } = req.query;
 
+  // 🚫 Missing or invalid query
   if (!query || typeof query !== "string") {
     return res.status(400).json({
       error: "Missing or invalid 'query' parameter",
@@ -154,66 +169,89 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
   const lowerQuery = query.toLowerCase();
   const parsedFilters = {};
 
-  // 🧩 Basic rule-based parsing (expandable)
+  // 🧩 Rule-based interpretation
   if (lowerQuery.includes("palindromic") || lowerQuery.includes("palindrome")) {
     parsedFilters.is_palindrome = true;
   }
+
+  if (lowerQuery.includes("non-palindromic") || lowerQuery.includes("not palindrome")) {
+    parsedFilters.is_palindrome = false;
+  }
+
   if (lowerQuery.includes("single word") || lowerQuery.includes("one word")) {
     parsedFilters.word_count = 1;
   }
-  if (lowerQuery.includes("longer than")) {
-    const match = lowerQuery.match(/longer than (\d+)/);
-    if (match) parsedFilters.min_length = parseInt(match[1]) + 1;
+
+  if (lowerQuery.includes("two word")) {
+    parsedFilters.word_count = 2;
   }
-  if (lowerQuery.includes("shorter than")) {
-    const match = lowerQuery.match(/shorter than (\d+)/);
-    if (match) parsedFilters.max_length = parseInt(match[1]) - 1;
+
+  // “longer than N characters”
+  const longerMatch = lowerQuery.match(/longer than (\d+)/);
+  if (longerMatch) parsedFilters.min_length = parseInt(longerMatch[1]) + 1;
+
+  // “shorter than N characters”
+  const shorterMatch = lowerQuery.match(/shorter than (\d+)/);
+  if (shorterMatch) parsedFilters.max_length = parseInt(shorterMatch[1]) - 1;
+
+  // “exactly N characters”
+  const exactMatch = lowerQuery.match(/exactly (\d+)/);
+  if (exactMatch) {
+    parsedFilters.min_length = parseInt(exactMatch[1]);
+    parsedFilters.max_length = parseInt(exactMatch[1]);
   }
-  if (lowerQuery.includes("containing the letter") || lowerQuery.includes("contains the letter")) {
-    const match = lowerQuery.match(/letter ([a-zA-Z])/);
-    if (match) parsedFilters.contains_character = match[1].toLowerCase();
-  }
+
+  // “containing the letter X”
+  const containsMatch = lowerQuery.match(/letter ([a-z])/);
+  if (containsMatch) parsedFilters.contains_character = containsMatch[1].toLowerCase();
+
   if (lowerQuery.includes("containing the first vowel")) {
     parsedFilters.contains_character = "a"; // heuristic: first vowel = 'a'
   }
 
-  // 🛑 No valid keywords detected
+  // 🛑 No valid filters found
   if (Object.keys(parsedFilters).length === 0) {
     return res.status(400).json({
       error: "Unable to parse natural language query",
-      hint: "Try phrases like 'all single word palindromic strings'",
+      hint: "Try 'all single word palindromic strings' or 'strings longer than 5 characters'",
     });
   }
 
-  // ♻️ Reuse your existing filtering logic
+  // 🧮 Apply filters
   let filtered = [...storage];
+
   if (parsedFilters.is_palindrome !== undefined) {
     filtered = filtered.filter(
       (s) => s.properties.is_palindrome === parsedFilters.is_palindrome
     );
   }
-  if (parsedFilters.min_length) {
-    filtered = filtered.filter(
-      (s) => s.properties.length >= parsedFilters.min_length
-    );
-  }
-  if (parsedFilters.max_length) {
-    filtered = filtered.filter(
-      (s) => s.properties.length <= parsedFilters.max_length
-    );
-  }
-  if (parsedFilters.word_count) {
-    filtered = filtered.filter(
-      (s) => s.properties.word_count === parsedFilters.word_count
-    );
-  }
-  if (parsedFilters.contains_character) {
+
+  if (parsedFilters.min_length)
+    filtered = filtered.filter((s) => s.properties.length >= parsedFilters.min_length);
+
+  if (parsedFilters.max_length)
+    filtered = filtered.filter((s) => s.properties.length <= parsedFilters.max_length);
+
+  if (parsedFilters.word_count)
+    filtered = filtered.filter((s) => s.properties.word_count === parsedFilters.word_count);
+
+  if (parsedFilters.contains_character)
     filtered = filtered.filter((s) =>
       s.value.toLowerCase().includes(parsedFilters.contains_character)
     );
+
+  // ❌ No results found
+  if (!filtered.length) {
+    return res.status(404).json({
+      error: "No strings matched query",
+      interpreted_query: {
+        original: query,
+        parsed_filters: parsedFilters,
+      },
+    });
   }
 
-  // ✅ Success response
+  // ✅ Success
   return res.status(200).json({
     data: filtered,
     count: filtered.length,
