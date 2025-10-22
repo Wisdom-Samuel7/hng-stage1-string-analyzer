@@ -1,0 +1,39 @@
+[
+  {
+    "id": "4bd92bcc0b8ff340be98a0559e079a33c1b68fe6f53520bfc5b8099fd52c0c7a",
+    "value": "madamtre",
+    "properties": {
+      "length": 8,
+      "is_palindrome": false,
+      "unique_characters": 6,
+      "word_count": 1,
+      "sha256_hash": "4bd92bcc0b8ff340be98a0559e079a33c1b68fe6f53520bfc5b8099fd52c0c7a",
+      "character_frequency_map": {
+        "m": 2,
+        "a": 2,
+        "d": 1,
+        "t": 1,
+        "r": 1,
+        "e": 1
+      }
+    },
+    "created_at": "2025-10-22T09:58:52.252Z"
+  },
+  {
+    "id": "765cc52b3dbc1bb8ec279ef9c8ec3d0f251c0c92a6ecdc1870be8f7dc7538b21",
+    "value": "madam",
+    "properties": {
+      "length": 5,
+      "is_palindrome": true,
+      "unique_characters": 3,
+      "word_count": 1,
+      "sha256_hash": "765cc52b3dbc1bb8ec279ef9c8ec3d0f251c0c92a6ecdc1870be8f7dc7538b21",
+      "character_frequency_map": {
+        "m": 2,
+        "a": 2,
+        "d": 1
+      }
+    },
+    "created_at": "2025-10-22T09:58:58.754Z"
+  }
+]
