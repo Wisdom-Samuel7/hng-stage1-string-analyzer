@@ -1,40 +1,50 @@
-// Import dependencies
 import express from "express";
 import cors from "cors";
+import fs from "fs";
 import { analyzeString } from "./utils/analyzer.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🗃️ In-memory storage (temporary)
-let storage = [];
+// 📂 File-based persistence (instead of pure memory)
+const DATA_FILE = "./data.json";
 
-// ✅ Root route
+// Load saved strings from file
+let storage = [];
+if (fs.existsSync(DATA_FILE)) {
+  storage = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8") || "[]");
+}
+
+// Helper to save data persistently
+function saveStorage() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(storage, null, 2));
+}
+
+// 🟢 Root Route
 app.get("/", (req, res) => {
-  res.send("🚀 HNG Stage 1 - String Analyzer API is running! Use /strings");
+  res.send("🚀 HNG Stage 1 - String Analyzer API is live! Use /strings");
 });
 
 
-// 🧠 POST /strings → Analyze and store new string
+// 🧠 POST /strings → Analyze and store string
 app.post("/strings", (req, res) => {
   const { value } = req.body;
 
-  // Validate input
+  // 🛑 Validation
   if (!value) return res.status(400).json({ error: "Missing 'value' field" });
   if (typeof value !== "string")
     return res.status(422).json({ error: "'value' must be a string" });
 
-  // Check duplicates
+  // 🧩 Duplicate check
   const exists = storage.find((s) => s.value === value);
   if (exists)
-    return res.status(409).json({ error: "String already exists in system" });
+    return res.status(409).json({ error: "String already exists in the system" });
 
-  // Analyze the string
+  // 🔍 Analyze
   const properties = analyzeString(value);
   const created_at = new Date().toISOString();
 
-  // Build response object
   const entry = {
     id: properties.sha256_hash,
     value,
@@ -43,26 +53,24 @@ app.post("/strings", (req, res) => {
   };
 
   storage.push(entry);
+  saveStorage();
+
   res.status(201).json(entry);
 });
 
 
 // 🔍 GET /strings/:value → Retrieve a specific string
-// 🟢 GET /strings/:value — get specific (case-insensitive)
 app.get("/strings/:value", (req, res) => {
   const paramValue = req.params.value.toLowerCase();
   const found = storage.find((s) => s.value.toLowerCase() === paramValue);
 
-  if (!found) {
-    return res.status(404).json({ error: "String not found" });
-  }
+  if (!found) return res.status(404).json({ error: "String does not exist in the system" });
 
-  return res.status(200).json(found);
+  res.status(200).json(found);
 });
 
 
-
-// 🧩 GET /strings → Retrieve all strings with filtering
+// 🧩 GET /strings → Retrieve all strings (with filters)
 app.get("/strings", (req, res) => {
   const {
     is_palindrome,
@@ -74,50 +82,47 @@ app.get("/strings", (req, res) => {
 
   let filtered = [...storage];
 
-  // Apply filters one by one
+  // Filter: is_palindrome
   if (is_palindrome !== undefined) {
-    if (is_palindrome !== "true" && is_palindrome !== "false") {
+    if (is_palindrome !== "true" && is_palindrome !== "false")
       return res.status(400).json({
-        error: "Invalid value for 'is_palindrome'. Must be true or false",
+        error: "Invalid 'is_palindrome' value. Must be true or false",
       });
-    }
-    filtered = filtered.filter(
-      (s) => s.properties.is_palindrome === (is_palindrome === "true")
-    );
+
+    const bool = is_palindrome === "true";
+    filtered = filtered.filter((s) => s.properties.is_palindrome === bool);
   }
 
+  // Filter: min_length
   if (min_length) {
-    const min = Number(min_length);
-    if (isNaN(min))
-      return res.status(400).json({ error: "'min_length' must be an integer" });
+    const min = parseInt(min_length);
+    if (isNaN(min)) return res.status(400).json({ error: "'min_length' must be a number" });
     filtered = filtered.filter((s) => s.properties.length >= min);
   }
 
+  // Filter: max_length
   if (max_length) {
-    const max = Number(max_length);
-    if (isNaN(max))
-      return res.status(400).json({ error: "'max_length' must be an integer" });
+    const max = parseInt(max_length);
+    if (isNaN(max)) return res.status(400).json({ error: "'max_length' must be a number" });
     filtered = filtered.filter((s) => s.properties.length <= max);
   }
 
+  // Filter: word_count
   if (word_count) {
-    const words = Number(word_count);
-    if (isNaN(words))
-      return res.status(400).json({ error: "'word_count' must be an integer" });
-    filtered = filtered.filter((s) => s.properties.word_count === words);
+    const count = parseInt(word_count);
+    if (isNaN(count)) return res.status(400).json({ error: "'word_count' must be a number" });
+    filtered = filtered.filter((s) => s.properties.word_count === count);
   }
 
+  // Filter: contains_character
   if (contains_character) {
-    if (typeof contains_character !== "string" || contains_character.length !== 1)
-      return res.status(400).json({
-        error: "'contains_character' must be a single character",
-      });
+    if (contains_character.length !== 1)
+      return res.status(400).json({ error: "'contains_character' must be a single character" });
     filtered = filtered.filter((s) =>
       s.value.toLowerCase().includes(contains_character.toLowerCase())
     );
   }
 
-  // Response
   res.status(200).json({
     data: filtered,
     count: filtered.length,
@@ -132,49 +137,29 @@ app.get("/strings", (req, res) => {
 });
 
 
-// 🟢 DELETE /strings/:value — delete string (with confirmation)
-app.delete("/strings/:value", (req, res) => {
-  const paramValue = req.params.value.toLowerCase();
-  const index = storage.findIndex((s) => s.value.toLowerCase() === paramValue);
-
-  if (index === -1) {
-    return res.status(404).json({ error: "String not found in system" });
-  }
-
-  const deleted = storage.splice(index, 1)[0];
-
-  return res.status(200).json({
-    status: "success",
-    message: `String '${deleted.value}' deleted successfully.`,
-    deleted: {
-      id: deleted.id,
-      value: deleted.value,
-      deleted_at: new Date().toISOString(),
-    },
-  });
-});
-
-
 // 🗣️ GET /strings/filter-by-natural-language → interpret plain English queries
 app.get("/strings/filter-by-natural-language", (req, res) => {
   const { query } = req.query;
 
-  // 🚫 Missing or invalid query
+  // 🧱 Validate query param
   if (!query || typeof query !== "string") {
     return res.status(400).json({
       error: "Missing or invalid 'query' parameter",
     });
   }
 
-  const lowerQuery = query.toLowerCase();
+  const lowerQuery = query.toLowerCase().trim();
   const parsedFilters = {};
 
-  // 🧩 Rule-based interpretation
+  // 🧩 Interpret common natural language patterns
   if (lowerQuery.includes("palindromic") || lowerQuery.includes("palindrome")) {
     parsedFilters.is_palindrome = true;
   }
 
-  if (lowerQuery.includes("non-palindromic") || lowerQuery.includes("not palindrome")) {
+  if (
+    lowerQuery.includes("non-palindromic") ||
+    lowerQuery.includes("not palindrome")
+  ) {
     parsedFilters.is_palindrome = false;
   }
 
@@ -182,7 +167,7 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
     parsedFilters.word_count = 1;
   }
 
-  if (lowerQuery.includes("two word")) {
+  if (lowerQuery.includes("two word") || lowerQuery.includes("two words")) {
     parsedFilters.word_count = 2;
   }
 
@@ -203,21 +188,23 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
 
   // “containing the letter X”
   const containsMatch = lowerQuery.match(/letter ([a-z])/);
-  if (containsMatch) parsedFilters.contains_character = containsMatch[1].toLowerCase();
+  if (containsMatch)
+    parsedFilters.contains_character = containsMatch[1].toLowerCase();
 
+  // “containing the first vowel”
   if (lowerQuery.includes("containing the first vowel")) {
-    parsedFilters.contains_character = "a"; // heuristic: first vowel = 'a'
+    parsedFilters.contains_character = "a"; // heuristic
   }
 
-  // 🛑 No valid filters found
+  // 🛑 If no valid filters extracted
   if (Object.keys(parsedFilters).length === 0) {
     return res.status(400).json({
       error: "Unable to parse natural language query",
-      hint: "Try 'all single word palindromic strings' or 'strings longer than 5 characters'",
+      hint: "Try queries like 'all single word palindromic strings' or 'strings longer than 5 characters'",
     });
   }
 
-  // 🧮 Apply filters
+  // 🧮 Apply filters on in-memory storage
   let filtered = [...storage];
 
   if (parsedFilters.is_palindrome !== undefined) {
@@ -226,24 +213,36 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
     );
   }
 
-  if (parsedFilters.min_length)
-    filtered = filtered.filter((s) => s.properties.length >= parsedFilters.min_length);
-
-  if (parsedFilters.max_length)
-    filtered = filtered.filter((s) => s.properties.length <= parsedFilters.max_length);
-
-  if (parsedFilters.word_count)
-    filtered = filtered.filter((s) => s.properties.word_count === parsedFilters.word_count);
-
-  if (parsedFilters.contains_character)
-    filtered = filtered.filter((s) =>
-      s.value.toLowerCase().includes(parsedFilters.contains_character)
+  if (parsedFilters.min_length !== undefined) {
+    filtered = filtered.filter(
+      (s) => s.properties.length >= parsedFilters.min_length
     );
+  }
 
-  // ❌ No results found
-  if (!filtered.length) {
+  if (parsedFilters.max_length !== undefined) {
+    filtered = filtered.filter(
+      (s) => s.properties.length <= parsedFilters.max_length
+    );
+  }
+
+  if (parsedFilters.word_count !== undefined) {
+    filtered = filtered.filter(
+      (s) => s.properties.word_count === parsedFilters.word_count
+    );
+  }
+
+  if (parsedFilters.contains_character !== undefined) {
+    filtered = filtered.filter((s) =>
+      s.value
+        .toLowerCase()
+        .includes(parsedFilters.contains_character.toLowerCase())
+    );
+  }
+
+  // ❌ No matches found
+  if (filtered.length === 0) {
     return res.status(404).json({
-      error: "No strings matched query",
+      error: "No strings matched the query",
       interpreted_query: {
         original: query,
         parsed_filters: parsedFilters,
@@ -251,7 +250,7 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
     });
   }
 
-  // ✅ Success
+  // ✅ Success response
   return res.status(200).json({
     data: filtered,
     count: filtered.length,
@@ -264,8 +263,22 @@ app.get("/strings/filter-by-natural-language", (req, res) => {
 
 
 
+// 🗑️ DELETE /strings/:value
+app.delete("/strings/:value", (req, res) => {
+  const val = req.params.value.toLowerCase();
+  const index = storage.findIndex((s) => s.value.toLowerCase() === val);
+
+  if (index === -1)
+    return res.status(404).json({ error: "String does not exist in the system" });
+
+  storage.splice(index, 1);
+  saveStorage();
+  return res.status(204).send(); // per spec
+});
+
+
 // 🚀 Start Server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on: http://localhost:${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`✅ Server running at: http://localhost:${PORT}`)
+);
